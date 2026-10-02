@@ -1,0 +1,901 @@
+{
+  "name": "Support Ticket Routing - Advanced",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "in:inbox -category:promotions -category:social -category:updates -category:forums -subject:TCK- -from:no-reply -from:noreply -from:mailer-daemon -from:notifications",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "7b1872b7-1665-42ee-9aaf-6d6049109fbc",
+      "name": "New Support Email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        4192,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "text": "=From: {{ $json.from.text }}\nSubject: {{ $json.subject }}\n\n{{ ($json.text || \"\").slice(0, 6000) }}",
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{\n  \"customer_name\": \"Jane Doe\",\n  \"product\": \"Mobile App\",\n  \"category\": \"billing\",\n  \"priority\": \"normal\",\n  \"summary\": \"Customer was charged twice for the March subscription and wants a refund.\"\n}",
+        "options": {
+          "systemPromptTemplate": "You are a customer support triage assistant. Read the incoming support email and extract the requested fields.\n- category: exactly one of billing, technical, account, sales, general. billing = payments, invoices, refunds; technical = bugs, errors, outages, how-to problems; account = login, password, access, profile changes; sales = pricing, demos, plans, purchase questions; general = anything else.\n- priority: exactly one of urgent, high, normal, low. urgent = complete service outage, security breach or suspected fraud, or a customer losing money right now with no workaround. high = billing errors such as double charges or refund requests, a customer blocked from using the product, or a clearly angry escalation. normal = standard request. low = feedback or non-time-sensitive question.\n- product: the product or service mentioned, or \"unspecified\".\n- customer_name: the sender's name if stated, else empty.\n- summary: one sentence describing the issue.\nUse lowercase for category and priority."
+        }
+      },
+      "id": "2a625ceb-9dda-4d83-91df-1fe13e9e4006",
+      "name": "Classify Ticket",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        4416,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "47879eb1-8f8e-4089-959a-4572fa027e92",
+      "name": "OpenAI Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        4496,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "support ticket",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "<SHEET_NAME_OR_GID>",
+          "mode": "list",
+          "cachedResultName": "routing",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit#gid=123456789"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "category",
+              "lookupValue": "={{ [\"billing\",\"technical\",\"account\",\"sales\",\"general\"].includes(String($json.output.category).toLowerCase().trim()) ? String($json.output.category).toLowerCase().trim() : \"general\" }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "id": "d9af3f1f-ab43-4801-ae13-d55cf1cfccab",
+      "name": "Routing Directory",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4768,
+        1312
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "ticket_id",
+              "type": "string",
+              "value": "=TCK-{{ $now.toFormat(\"yyyyMMdd\") }}-{{ $(\"New Support Email\").item.json.id.slice(-6).toUpperCase() }}"
+            },
+            {
+              "id": "a2",
+              "name": "category",
+              "type": "string",
+              "value": "={{ [\"billing\",\"technical\",\"account\",\"sales\",\"general\"].includes(String($(\"Classify Ticket\").item.json.output.category).toLowerCase().trim()) ? String($(\"Classify Ticket\").item.json.output.category).toLowerCase().trim() : \"general\" }}"
+            },
+            {
+              "id": "a3",
+              "name": "assigned_team",
+              "type": "string",
+              "value": "={{ $json.team_name || ({billing:\"Billing\", technical:\"Technical Support\", account:\"Account & Access\", sales:\"Sales\", general:\"General Support\"})[String($(\"Classify Ticket\").item.json.output.category).toLowerCase().trim()] || \"General Support\" }}"
+            },
+            {
+              "id": "a4",
+              "name": "assigned_to",
+              "type": "string",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "id": "a5",
+              "name": "priority",
+              "type": "string",
+              "value": "={{ [\"urgent\",\"high\",\"normal\",\"low\"].includes(String($(\"Classify Ticket\").item.json.output.priority).toLowerCase().trim()) ? String($(\"Classify Ticket\").item.json.output.priority).toLowerCase().trim() : \"normal\" }}"
+            },
+            {
+              "id": "a6",
+              "name": "product",
+              "type": "string",
+              "value": "={{ $(\"Classify Ticket\").item.json.output.product || \"unspecified\" }}"
+            },
+            {
+              "id": "a7",
+              "name": "summary",
+              "type": "string",
+              "value": "={{ $(\"Classify Ticket\").item.json.output.summary }}"
+            },
+            {
+              "id": "a8",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $(\"New Support Email\").item.json.from.value[0].address }}"
+            },
+            {
+              "id": "a9",
+              "name": "customer_name",
+              "type": "string",
+              "value": "={{ $(\"Classify Ticket\").item.json.output.customer_name || $(\"New Support Email\").item.json.from.value[0].name || \"\" }}"
+            },
+            {
+              "id": "a10",
+              "name": "subject",
+              "type": "string",
+              "value": "={{ $(\"New Support Email\").item.json.subject }}"
+            },
+            {
+              "id": "a11",
+              "name": "gmail_message_id",
+              "type": "string",
+              "value": "={{ $(\"New Support Email\").item.json.id }}"
+            },
+            {
+              "id": "a12",
+              "name": "received_at",
+              "type": "string",
+              "value": "={{ $(\"New Support Email\").item.json.date }}"
+            },
+            {
+              "id": "a13",
+              "name": "email_body",
+              "type": "string",
+              "value": "={{ ($(\"New Support Email\").item.json.text || \"\").slice(0, 3000) }}"
+            },
+            {
+              "id": "a14",
+              "name": "sla_hours",
+              "type": "number",
+              "value": "={{ ({urgent:1, high:4, normal:24, low:72})[String($(\"Classify Ticket\").item.json.output.priority).toLowerCase().trim()] || 24 }}"
+            },
+            {
+              "id": "a15",
+              "name": "sla_due_at",
+              "type": "string",
+              "value": "={{ $now.plus({hours: ({urgent:1, high:4, normal:24, low:72})[String($(\"Classify Ticket\").item.json.output.priority).toLowerCase().trim()] || 24}).toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0344e42c-3c2e-4207-8491-053a1042c107",
+      "name": "Build Ticket",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        4992,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "support ticket",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "<SHEET_NAME_OR_GID>",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ticket_id": "={{ $json.ticket_id }}",
+            "received_at": "={{ $json.received_at }}",
+            "customer_email": "={{ $json.customer_email }}",
+            "customer_name": "={{ $json.customer_name }}",
+            "subject": "={{ $json.subject }}",
+            "summary": "={{ $json.summary }}",
+            "category": "={{ $json.category }}",
+            "product": "={{ $json.product }}",
+            "priority": "={{ $json.priority }}",
+            "assigned_team": "={{ $json.assigned_team }}",
+            "assigned_to": "={{ $json.assigned_to }}",
+            "status": "open",
+            "gmail_message_id": "={{ $json.gmail_message_id }}",
+            "sla_due_at": "={{ $json.sla_due_at }}",
+            "reminder_sent": "no"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "product",
+              "displayName": "product",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_team",
+              "displayName": "assigned_team",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_to",
+              "displayName": "assigned_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sla_due_at",
+              "displayName": "sla_due_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reminder_sent",
+              "displayName": "reminder_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "434557af-611c-45d5-ac37-1a41204c29d3",
+      "name": "Create Ticket",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5264,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $(\"Build Ticket\").item.json.assigned_to }}",
+        "subject": "=[{{ $(\"Build Ticket\").item.json.priority.toUpperCase() }}] {{ $(\"Build Ticket\").item.json.ticket_id }} - {{ $(\"Build Ticket\").item.json.subject }}",
+        "message": "=<p>A new support ticket has been assigned to <b>{{ $(\"Build Ticket\").item.json.assigned_team }}</b>.</p><ul><li><b>Ticket:</b> {{ $(\"Build Ticket\").item.json.ticket_id }}</li><li><b>Priority:</b> {{ $(\"Build Ticket\").item.json.priority }}</li><li><b>Category:</b> {{ $(\"Build Ticket\").item.json.category }}</li><li><b>Product:</b> {{ $(\"Build Ticket\").item.json.product }}</li><li><b>Customer:</b> {{ $(\"Build Ticket\").item.json.customer_name }} &lt;{{ $(\"Build Ticket\").item.json.customer_email }}&gt;</li><li><b>Summary:</b> {{ $(\"Build Ticket\").item.json.summary }}</li></ul><p><b>Original message:</b></p><blockquote>{{ $(\"Build Ticket\").item.json.email_body.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\").replace(/\\n/g, \"<br>\") }}</blockquote>",
+        "options": {
+          "appendAttribution": false,
+          "replyTo": "={{ $(\"Build Ticket\").item.json.customer_email }}"
+        }
+      },
+      "id": "dfeeeb60-7806-4785-8ddb-ec599e77b91d",
+      "name": "Notify Assignee",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        5488,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $(\"Build Ticket\").item.json.gmail_message_id }}"
+      },
+      "id": "92d9ad50-de5d-40d8-9aff-8de30d204a25",
+      "name": "Mark Email Handled",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        5712,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "212ab395-46cb-4982-ad6d-d16fc69f16a5",
+              "leftValue": "={{ !/no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?@/i.test($(\"Build Ticket\").item.json.customer_email) && !/out of office|automatic reply|auto-?reply|undeliverable|delivery status/i.test($(\"Build Ticket\").item.json.subject) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4d7f66bc-b6c0-4fc6-8cbf-7bf900167f7b",
+      "name": "Is Real Customer?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5488,
+        1648
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $(\"Build Ticket\").item.json.customer_email }}",
+        "subject": "=Re: {{ $(\"Build Ticket\").item.json.subject }}",
+        "message": "=<p>Hi {{ ($(\"Build Ticket\").item.json.customer_name || \"there\").replace(/[<>&]/g, \"\") }},</p><p>Thank you for contacting us. We have received your request and created ticket <b>{{ $(\"Build Ticket\").item.json.ticket_id }}</b>.</p><p>Our team will get back to you within <b>{{ ($(\"Build Ticket\").item.json.sla_hours <= 1 ? \"1 hour\" : $(\"Build Ticket\").item.json.sla_hours + \" hours\") }}</b>. Please keep your ticket ID for reference.</p><p>Best regards,<br>Support Team</p>",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "Support Team"
+        }
+      },
+      "id": "8590b904-813b-40e5-ae64-65c767b15eb8",
+      "name": "Auto Reply Customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        5712,
+        1648
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "588d7bb0-0d00-45a3-80d7-3fef315f16c5",
+              "leftValue": "={{ $(\"Build Ticket\").item.json.priority === \"urgent\" || $(\"Build Ticket\").item.json.category === \"sales\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "44003d41-f088-46f5-9094-a82ad8a14dd5",
+      "name": "Needs Urgent Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5488,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "<TELEGRAM_CHAT_ID>",
+        "text": "={{ $(\"Build Ticket\").item.json.priority === \"urgent\" ? \"\ud83d\udea8 URGENT TICKET\" : \"\ud83d\udcb0 NEW SALES LEAD\" }}\nID: {{ $(\"Build Ticket\").item.json.ticket_id }}\nPriority: {{ $(\"Build Ticket\").item.json.priority }} | Category: {{ $(\"Build Ticket\").item.json.category }}\nCustomer: {{ $(\"Build Ticket\").item.json.customer_name }} <{{ $(\"Build Ticket\").item.json.customer_email }}>\nSummary: {{ $(\"Build Ticket\").item.json.summary }}\nAssigned to: {{ $(\"Build Ticket\").item.json.assigned_to }}\nDue by: {{ $(\"Build Ticket\").item.json.sla_due_at }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "27375cf5-7509-4891-9292-490a939e8cad",
+      "name": "Urgent Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        5712,
+        1872
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "ae2c9eed-723f-4fc7-a72a-2bfaa1fe98a2",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        4192,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "support ticket",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "<SHEET_NAME_OR_GID>",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "open"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00fdbdc7-b873-4ae7-b2b9-889db83238c1",
+      "name": "Get Open Tickets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4416,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "aac23bcf-fcf1-4ebf-8d9a-c104059bcf1b",
+              "leftValue": "={{ $json.status === \"open\" && String($json.reminder_sent || \"\").toLowerCase() !== \"yes\" && Date.now() > Date.parse($json.sla_due_at) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b06b93f5-74b8-4a76-a1e7-a218bc4adf6a",
+      "name": "Find Overdue",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        4640,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.assigned_to }}",
+        "subject": "=OVERDUE: {{ $json.ticket_id }} - {{ $json.subject }}",
+        "message": "=<p><b>\u26a0 Overdue ticket</b> \u2014 the response deadline has passed.</p><ul><li><b>Ticket:</b> {{ $json.ticket_id }}</li><li><b>Priority:</b> {{ $json.priority }}</li><li><b>Category:</b> {{ $json.category }}</li><li><b>Customer:</b> {{ String($json.customer_name || \"\").replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") }} &lt;{{ String($json.customer_email || \"\").replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") }}&gt;</li><li><b>Subject:</b> {{ String($json.subject || \"\").replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") }}</li><li><b>Summary:</b> {{ String($json.summary || \"\").replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") }}</li><li><b>Was due:</b> {{ $json.sla_due_at }}</li></ul><p>Reply to the customer, then set <b>status</b> to <b>closed</b> in the sheet.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ef213d27-384c-4a3d-bd49-cca5b5fefc10",
+      "name": "Send Overdue Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        4864,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "support ticket",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "<SHEET_NAME_OR_GID>",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yrJm2MWz4G0-zxrVRsQm8Emn9HEaIU8T-TDsd3yUebw/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ticket_id": "={{ $(\"Find Overdue\").item.json.ticket_id }}",
+            "reminder_sent": "yes"
+          },
+          "matchingColumns": [
+            "ticket_id"
+          ],
+          "schema": [
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reminder_sent",
+              "displayName": "reminder_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "a4b6fd38-b48e-4c29-a245-0b01b0a590ee",
+      "name": "Mark Reminder Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5088,
+        2192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New Support Email": {
+      "main": [
+        [
+          {
+            "node": "Classify Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Ticket": {
+      "main": [
+        [
+          {
+            "node": "Routing Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify Ticket",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routing Directory": {
+      "main": [
+        [
+          {
+            "node": "Build Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Ticket": {
+      "main": [
+        [
+          {
+            "node": "Create Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ticket": {
+      "main": [
+        [
+          {
+            "node": "Notify Assignee",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Real Customer?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Needs Urgent Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Assignee": {
+      "main": [
+        [
+          {
+            "node": "Mark Email Handled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Real Customer?": {
+      "main": [
+        [
+          {
+            "node": "Auto Reply Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Urgent Alert?": {
+      "main": [
+        [
+          {
+            "node": "Urgent Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Open Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Open Tickets": {
+      "main": [
+        [
+          {
+            "node": "Find Overdue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Overdue": {
+      "main": [
+        [
+          {
+            "node": "Send Overdue Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Overdue Reminder": {
+      "main": [
+        [
+          {
+            "node": "Mark Reminder Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromAList",
+    "saveExecutionProgress": true
+  },
+  "versionId": "730a2c3b-0495-495b-b753-2abb8326beec",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "c7ec3dfaed43f1e6a8e1def6be32b0a187405dac404008c4ef4c816268b8ac20"
+  },
+  "nodeGroups": [],
+  "id": "aW7Khs2TMV3s30QF",
+  "tags": []
+}
